@@ -1,16 +1,16 @@
 {
     "key": {
         "name": "aws",
-        "path": "/Users/asonnino/.ssh/aws"
+        "path": "/home/ubuntu/.ssh/aws"
     },
     "port": 5000,
     "repo": {
         "name": "narwhal",
-        "url": "https://github.com/asonnino/narwhal",
+        "url": "https://github.com/iluhao/narwhal",
         "branch": "bullshark"
     },
     "instances": {
-        "type": "m5d.8xlarge",
+        "type": "m5.xlarge",
         "regions": [
             "us-east-1",
             "eu-north-1",
