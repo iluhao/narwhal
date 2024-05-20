@@ -86,7 +86,7 @@ impl Proposer {
         let header = Header::new(
             self.name,
             self.round,
-            self.digests.drain(0..1).collect(),
+            self.digests.drain(0..32).collect(),
             self.last_parents.drain(..).map(|x| x.digest()).collect(),
             &mut self.signature_service,
         )
@@ -184,7 +184,7 @@ impl Proposer {
 
                 // Make a new header.
                 self.make_header().await;
-                self.payload_size -= 32;
+                self.payload_size -= 32*32;
 
                 // Reschedule the timer.
                 let deadline = Instant::now() + Duration::from_millis(self.max_header_delay);
