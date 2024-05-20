@@ -73,7 +73,7 @@ impl Proposer {
                 round: 0,
                 last_parents: genesis,
                 last_leader: None,
-                digests: Vec::with_capacity(2 * header_size),
+                digests: Vec::with_capacity(2 * 10_000),
                 payload_size: 0,
             }
             .run()
@@ -86,7 +86,7 @@ impl Proposer {
         let header = Header::new(
             self.name,
             self.round,
-            self.digests.drain(..).collect(),
+            self.digests.drain(0..1).collect(),
             self.last_parents.drain(..).map(|x| x.digest()).collect(),
             &mut self.signature_service,
         )
@@ -173,7 +173,7 @@ impl Proposer {
             let enough_digests = self.payload_size >= self.header_size;
             let timer_expired = timer.is_elapsed();
 
-            if (timer_expired || (enough_digests && advance)) && enough_parents {
+            if (timer_expired || advance) && enough_digests && enough_parents {
                 if timer_expired {
                     warn!("Timer expired for round {}", self.round);
                 }
@@ -184,7 +184,7 @@ impl Proposer {
 
                 // Make a new header.
                 self.make_header().await;
-                self.payload_size = 0;
+                self.payload_size -= 32;
 
                 // Reschedule the timer.
                 let deadline = Instant::now() + Duration::from_millis(self.max_header_delay);
