@@ -73,7 +73,7 @@ impl Proposer {
                 round: 0,
                 last_parents: genesis,
                 last_leader: None,
-                digests: Vec::with_capacity(2 * 10_000),
+                digests: Vec::with_capacity(2 * 30),
                 payload_size: 0,
             }
             .run()
@@ -83,10 +83,14 @@ impl Proposer {
 
     async fn make_header(&mut self) {
         // Make a new header.
+        let mut y = self.header_size/32;
+        if self.header_size % 32 != 0 {
+            y += 1;
+        }
         let header = Header::new(
             self.name,
             self.round,
-            self.digests.drain(0..32).collect(),
+            self.digests.drain(0..y).collect(),
             self.last_parents.drain(..).map(|x| x.digest()).collect(),
             &mut self.signature_service,
         )
@@ -137,11 +141,11 @@ impl Proposer {
             if certificate.header.parents.contains(&leader) {
                 votes_for_leader += stake;
             } else {
-                no_votes += stake;
+                no_votes += 0;
             }
         }
 
-        let mut enough_votes = votes_for_leader >= self.committee.quorum_threshold();
+        let mut enough_votes = votes_for_leader >= self.committee.validity_threshold();
         if log_enabled!(log::Level::Debug) && enough_votes {
             if let Some(leader) = self.last_leader.as_ref() {
                 debug!(
@@ -158,7 +162,7 @@ impl Proposer {
     /// Main loop listening to incoming messages.
     pub async fn run(&mut self) {
         debug!("Dag starting at round {}", self.round);
-        let mut advance = true;
+        let mut advance = false;
 
         let timer = sleep(Duration::from_millis(self.max_header_delay));
         tokio::pin!(timer);
@@ -184,7 +188,11 @@ impl Proposer {
 
                 // Make a new header.
                 self.make_header().await;
-                self.payload_size -= 32*32;
+                let mut y = self.header_size/32;
+                if self.header_size % 32 != 0 {
+                    y += 1;
+                }
+                self.payload_size -= 32*y;
 
                 // Reschedule the timer.
                 let deadline = Instant::now() + Duration::from_millis(self.max_header_delay);
