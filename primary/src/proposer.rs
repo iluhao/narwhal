@@ -163,8 +163,6 @@ impl Proposer {
 
         let timer = sleep(Duration::from_millis(self.max_header_delay));
         tokio::pin!(timer);
-        let timer1 = sleep(Duration::from_millis(200));
-        tokio::pin!(timer1);
 
         loop {
             // Check if we can propose a new header. We propose a new header when we have a quorum of parents
@@ -173,16 +171,12 @@ impl Proposer {
             // (ii) we have enough digests (minimum header size) and we are on the happy path (we can vote for
             // the leader or the leader has enough votes to enable a commit).
             let enough_parents = !self.last_parents.is_empty();
-            let enough_digests = self.payload_size >= self.header_size;
+            // let enough_digests = self.payload_size >= self.header_size;
             let has_digests = self.payload_size;
             let timer_expired = timer.is_elapsed();
-            let timer_expired1 = timer1.is_elapsed();
-            if (timer_expired || advance) && ((timer_expired1 && has_digests != 0) || enough_digests) && enough_parents {
+            if (timer_expired || advance) && has_digests != 0 && enough_parents {
                 if timer_expired {
                     warn!("Timer expired for round {}", self.round);
-                }
-                if timer_expired {
-                    warn!("Timer1 expired for round {}", self.round);
                 }
                 // Advance to the next round.
                 self.round += 1;
