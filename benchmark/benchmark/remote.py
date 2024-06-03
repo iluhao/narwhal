@@ -81,6 +81,25 @@ class Bench:
         except (GroupException, ExecutionError) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
             raise BenchError('Failed to install repo on testbed', e)
+    
+    def addRTT(self, delay=0):
+        Print.info('Add RTT...')
+        cmd = [
+           
+            # Delete current rules.
+            'sudo tc qdisc del dev ens5 root',
+
+            # Add new rule.
+            f'sudo tc qdisc add dev ens5 root netem delay {delay}ms'
+        ]
+        hosts = self.manager.hosts(flat=True)
+        try:
+            g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
+            g.run(' ; '.join(cmd), hide=True)
+            Print.heading(f'Added RTT of {len(hosts)} nodes')
+        except (GroupException, ExecutionError) as e:
+            e = FabricError(e) if isinstance(e, GroupException) else e
+            raise BenchError('Failed to install repo on testbed', e)
 
     def kill(self, hosts=[], delete_logs=False):
         assert isinstance(hosts, list)
@@ -129,6 +148,24 @@ class Bench:
                 selected.append(ips)
             return selected
 
+    def _select_pubprivhosts(self, bench_parameters):
+        # Collocate the primary and its workers on the same machine.
+        if bench_parameters.collocate:
+            nodes = max(bench_parameters.nodes)
+
+            # Ensure there are enough privhosts.
+            pubips, privips = self.manager.pubprivhosts()
+            if sum(len(x) for x in pubips.values()) < nodes:
+                return []
+
+            # Select the privips in different data centers.
+            ordered_privips = zip(*privips.values())
+            ordered_privips = [x for y in ordered_privips for x in y]
+            ordered_pubips = zip(*pubips.values())
+            ordered_pubips = [x for y in ordered_pubips for x in y]
+
+            return ordered_pubips[:nodes], ordered_privips[:nodes]
+
     def _background_run(self, host, command, log_file):
         name = splitext(basename(log_file))[0]
         cmd = f'tmux new -d -s "{name}" "{command} |& tee {log_file}"'
@@ -158,7 +195,7 @@ class Bench:
         g = Group(*ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)
 
-    def _config(self, hosts, node_parameters, bench_parameters):
+    def _config(self, hosts, selected_privips, node_parameters, bench_parameters):
         Print.info('Generating configuration files...')
 
         # Cleanup all local configuration files.
@@ -186,22 +223,29 @@ class Bench:
         if bench_parameters.collocate:
             workers = bench_parameters.workers
             addresses = OrderedDict(
-                (x, [y] * (workers + 1)) for x, y in zip(names, hosts)
+                (x, [y] * (workers + 1)) for x, y in zip(names, selected_privips)
             )
         else:
             addresses = OrderedDict(
-                (x, y) for x, y in zip(names, hosts)
+                (x, y) for x, y in zip(names, selected_privips)
             )
-        committee = Committee(addresses, self.settings.base_port)
+
+        pub_addresses = OrderedDict(
+            (x, y) for x, y in zip(names, hosts)
+        )
+      
+        committee = Committee(addresses, pub_addresses, self.settings.base_port)
         committee.print(PathMaker.committee_file())
 
         node_parameters.print(PathMaker.parameters_file())
 
         # Cleanup all nodes and upload configuration files.
         names = names[:len(names)-bench_parameters.faults]
+        print(names)
         progress = progress_bar(names, prefix='Uploading config files:')
         for i, name in enumerate(progress):
             for ip in committee.ips(name):
+                print(ip)
                 c = Connection(ip, user='ubuntu', connect_kwargs=self.connect)
                 c.run(f'{CommandMaker.cleanup()} || true', hide=True)
                 c.put(PathMaker.committee_file(), '.')
@@ -225,7 +269,8 @@ class Bench:
         rate_share = ceil(rate / committee.workers())
         for i, addresses in enumerate(workers_addresses):
             for (id, address) in addresses:
-                host = Committee.ip(address)
+                # host = Committee.ip(address)
+                host = hosts[i]
                 cmd = CommandMaker.run_client(
                     address,
                     bench_parameters.tx_size,
@@ -238,7 +283,9 @@ class Bench:
         # Run the primaries (except the faulty ones).
         Print.info('Booting primaries...')
         for i, address in enumerate(committee.primary_addresses(faults)):
-            host = Committee.ip(address)
+            # host = Committee.ip(address)
+            host = hosts[i]
+            print("primary", host,".node-",i)
             cmd = CommandMaker.run_primary(
                 PathMaker.key_file(i),
                 PathMaker.committee_file(),
@@ -253,7 +300,8 @@ class Bench:
         Print.info('Booting workers...')
         for i, addresses in enumerate(workers_addresses):
             for (id, address) in addresses:
-                host = Committee.ip(address)
+                # host = Committee.ip(address)
+                host = hosts[i]
                 cmd = CommandMaker.run_worker(
                     PathMaker.key_file(i),
                     PathMaker.committee_file(),
@@ -275,13 +323,14 @@ class Bench:
         # Delete local logs (if any).
         cmd = CommandMaker.clean_logs()
         subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
+        hosts = committee.ips()
 
         # Download log files.
         workers_addresses = committee.workers_addresses(faults)
         progress = progress_bar(workers_addresses, prefix='Downloading workers logs:')
         for i, addresses in enumerate(progress):
             for id, address in addresses:
-                host = Committee.ip(address)
+                host = hosts[i]
                 c = Connection(host, user='ubuntu', connect_kwargs=self.connect)
                 c.get(
                     PathMaker.client_log_file(i, id), 
@@ -295,7 +344,8 @@ class Bench:
         primary_addresses = committee.primary_addresses(faults)
         progress = progress_bar(primary_addresses, prefix='Downloading primaries logs:')
         for i, address in enumerate(progress):
-            host = Committee.ip(address)
+            # host = Committee.ip(address)
+            host = hosts[i]
             c = Connection(host, user='ubuntu', connect_kwargs=self.connect)
             c.get(
                 PathMaker.primary_log_file(i), 
@@ -316,7 +366,7 @@ class Bench:
             raise BenchError('Invalid nodes or bench parameters', e)
 
         # Select which hosts to use.
-        selected_hosts = self._select_hosts(bench_parameters)
+        selected_hosts, selected_privips = self._select_pubprivhosts(bench_parameters)
         if not selected_hosts:
             Print.warn('There are not enough instances available')
             return
@@ -331,7 +381,7 @@ class Bench:
         # Upload all configuration files.
         try:
             committee = self._config(
-                selected_hosts, node_parameters, bench_parameters
+                selected_hosts, selected_privips, node_parameters, bench_parameters
             )
         except (subprocess.SubprocessError, GroupException) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e

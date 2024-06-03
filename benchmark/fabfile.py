@@ -91,6 +91,14 @@ def install(ctx):
 
 
 @task
+def addRTT(ctx):
+    ''' add RTT '''
+    try:
+        Bench(ctx).addRTT(150)
+    except BenchError as e:
+        Print.error(e)
+
+@task
 def remote(ctx, debug=False):
     ''' Run benchmarks on AWS '''
     bench_params = {
@@ -100,7 +108,7 @@ def remote(ctx, debug=False):
         'collocate': True,
         'rate': [50_000],
         'tx_size': 512,
-        'duration': 30,
+        'duration': 20,
         'runs': 1,
     }
     node_params = {

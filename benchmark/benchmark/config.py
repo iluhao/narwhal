@@ -42,7 +42,7 @@ class Committee:
         }
     '''
 
-    def __init__(self, addresses, base_port):
+    def __init__(self, addresses, pub_addresses, base_port):
         ''' The `addresses` field looks as follows:
             { 
                 "name": ["host", "host", ...],
@@ -63,6 +63,7 @@ class Committee:
         port = base_port
         self.json = {'authorities': OrderedDict()}
         for name, hosts in addresses.items():
+            print("addresses.items name:", name)
             host = hosts.pop(0)
             primary_addr = {
                 'primary_to_primary': f'{host}:{port}',
@@ -81,6 +82,7 @@ class Committee:
 
             self.json['authorities'][name] = {
                 'stake': 1,
+                'public_ip': pub_addresses[name],
                 'primary': primary_addr,
                 'workers': workers_addr
             }
@@ -113,18 +115,10 @@ class Committee:
         else:
             names = [name]
 
-        ips = set()
+        ips = []
         for name in names:
-            addresses = self.json['authorities'][name]['primary']
-            ips.add(self.ip(addresses['primary_to_primary']))
-            ips.add(self.ip(addresses['worker_to_primary']))
-
-            for worker in self.json['authorities'][name]['workers'].values():
-                ips.add(self.ip(worker['primary_to_worker']))
-                ips.add(self.ip(worker['worker_to_worker']))
-                ips.add(self.ip(worker['transactions']))
-
-        return list(ips)
+            ips.append(self.json['authorities'][name]['public_ip'])
+        return ips
 
     def remove_nodes(self, nodes):
         ''' remove the `nodes` last nodes from the committee. '''

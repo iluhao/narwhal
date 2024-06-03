@@ -1,7 +1,7 @@
 {
     "key": {
         "name": "aws",
-        "path": "/home/ubuntu/.ssh/aws"
+        "path": "/home/hao/.ssh/aws"
     },
     "port": 5000,
     "repo": {
@@ -10,13 +10,9 @@
         "branch": "bullshark"
     },
     "instances": {
-        "type": "m5.xlarge",
+        "type": "m5.2xlarge",
         "regions": [
-            "us-east-1",
-            "eu-north-1",
-            "ap-southeast-2",
-            "us-west-1",
-            "ap-northeast-1"
+            "ap-southeast-2"
         ]
     }
 }
