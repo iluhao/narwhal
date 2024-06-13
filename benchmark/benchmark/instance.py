@@ -37,7 +37,7 @@ class InstanceManager:
     def _get(self, state):
         # Possible states are: 'pending', 'running', 'shutting-down',
         # 'terminated', 'stopping', and 'stopped'.
-        ids, ips = defaultdict(list), defaultdict(list)
+        ids, ips, privips = defaultdict(list), defaultdict(list), defaultdict(list)
         for region, client in self.clients.items():
             r = client.describe_instances(
                 Filters=[
@@ -56,14 +56,16 @@ class InstanceManager:
                 ids[region] += [x['InstanceId']]
                 if 'PublicIpAddress' in x:
                     ips[region] += [x['PublicIpAddress']]
-        return ids, ips
+                if 'PrivateIpAddress' in x:
+                    privips[region] += [x['PrivateIpAddress']]
+        return ids, ips, privips
 
     def _wait(self, state):
         # Possible states are: 'pending', 'running', 'shutting-down',
         # 'terminated', 'stopping', and 'stopped'.
         while True:
             sleep(1)
-            ids, _ = self._get(state)
+            ids, _, _ = self._get(state)
             if sum(len(x) for x in ids.values()) == 0:
                 break
 
@@ -168,7 +170,7 @@ class InstanceManager:
 
     def terminate_instances(self):
         try:
-            ids, _ = self._get(['pending', 'running', 'stopping', 'stopped'])
+            ids, _, _ = self._get(['pending', 'running', 'stopping', 'stopped'])
             size = sum(len(x) for x in ids.values())
             if size == 0:
                 Print.heading(f'All instances are shut down')
@@ -194,7 +196,7 @@ class InstanceManager:
     def start_instances(self, max):
         size = 0
         try:
-            ids, _ = self._get(['stopping', 'stopped'])
+            ids, _, _ = self._get(['stopping', 'stopped'])
             for region, client in self.clients.items():
                 if ids[region]:
                     target = ids[region]
@@ -207,7 +209,7 @@ class InstanceManager:
 
     def stop_instances(self):
         try:
-            ids, _ = self._get(['pending', 'running'])
+            ids, _, _ = self._get(['pending', 'running'])
             for region, client in self.clients.items():
                 if ids[region]:
                     client.stop_instances(InstanceIds=ids[region])
@@ -218,8 +220,15 @@ class InstanceManager:
 
     def hosts(self, flat=False):
         try:
-            _, ips = self._get(['pending', 'running'])
+            _, ips, _ = self._get(['pending', 'running'])
             return [x for y in ips.values() for x in y] if flat else ips
+        except ClientError as e:
+            raise BenchError('Failed to gather instances IPs', AWSError(e))
+
+    def pubprivhosts(self, flat=False):
+        try:
+            _, ips, privips = self._get(['pending', 'running'])
+            return ips, privips
         except ClientError as e:
             raise BenchError('Failed to gather instances IPs', AWSError(e))
 
