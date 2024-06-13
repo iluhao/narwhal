@@ -10,6 +10,7 @@ use primary::{Certificate, Primary};
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver};
 use worker::Worker;
+use crypto::SignatureService;
 
 /// The default channel capacity.
 pub const CHANNEL_CAPACITY: usize = 1_000;
@@ -74,6 +75,7 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
 
     // Read the committee and node's keypair from file.
     let keypair = KeyPair::import(key_file).context("Failed to load the node's keypair")?;
+    let keypair1 = KeyPair::import(key_file).context("Failed to load the node's keypair")?;
     let committee =
         Committee::import(committee_file).context("Failed to load the committee information")?;
 
@@ -90,6 +92,12 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
 
     // Channels the sequence of certificates.
     let (tx_output, rx_output) = channel(CHANNEL_CAPACITY);
+
+    // The `SignatureService` is used to require signatures on specific digests.
+    let secret1 = keypair1.secret;
+    let signature_service = SignatureService::new(secret1);
+
+
 
     // Check whether to run a primary, a worker, or an entire authority.
     match matches.subcommand() {
@@ -121,7 +129,7 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
                 .unwrap()
                 .parse::<WorkerId>()
                 .context("The worker id must be a positive integer")?;
-            Worker::spawn(keypair.name, id, committee, parameters, store);
+            Worker::spawn(keypair.name, id, committee, parameters, store, signature_service.clone());
         }
         _ => unreachable!(),
     }

@@ -7,10 +7,10 @@
     "repo": {
         "name": "narwhal",
         "url": "https://github.com/iluhao/narwhal",
-        "branch": "bullshark"
+        "branch": "dagwin"
     },
     "instances": {
-        "type": "m5.xlarge",
+        "type": "m5.2xlarge",
         "regions": [
             "us-east-1",
             "eu-north-1",

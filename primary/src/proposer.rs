@@ -10,7 +10,6 @@ use log::{debug, log_enabled, warn};
 use std::cmp::Ordering;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{sleep, Duration, Instant};
-use std::cmp::min;
 #[cfg(test)]
 #[path = "tests/proposer_tests.rs"]
 pub mod proposer_tests;
@@ -81,13 +80,12 @@ impl Proposer {
         });
     }
 
-    async fn make_header(&mut self, count:usize) {
+    async fn make_header(&mut self) {
         // Make a new header.
-        let y = count;
         let header = Header::new(
             self.name,
             self.round,
-            self.digests.drain(0..y).collect(),
+            self.digests.drain(..).collect(),
             self.last_parents.drain(..).map(|x| x.digest()).collect(),
             &mut self.signature_service,
         )
@@ -171,25 +169,21 @@ impl Proposer {
             // (ii) we have enough digests (minimum header size) and we are on the happy path (we can vote for
             // the leader or the leader has enough votes to enable a commit).
             let enough_parents = !self.last_parents.is_empty();
-            // let enough_digests = self.payload_size >= self.header_size;
-            let has_digests = self.payload_size;
+            let _enough_digests = self.payload_size >= self.header_size;
+            let _has_digests = self.payload_size;
             let timer_expired = timer.is_elapsed();
-            if (timer_expired || advance) && has_digests != 0 && enough_parents {
+            if (timer_expired || advance) && enough_parents {
                 if timer_expired {
                     warn!("Timer expired for round {}", self.round);
                 }
+
                 // Advance to the next round.
                 self.round += 1;
                 debug!("Dag moved to round {}", self.round);
-                let mut y = self.header_size/32;
-                if self.header_size % 32 != 0 {
-                    y += 1;
-                }
-                let digests_count = min(y, has_digests/32);
+        
                 // Make a new header.
-                self.make_header(digests_count).await;
-                self.payload_size -= 32*digests_count;
-
+                self.make_header().await;
+                self.payload_size = 0;
 
                 // Reschedule the timer.
                 let deadline = Instant::now() + Duration::from_millis(self.max_header_delay);

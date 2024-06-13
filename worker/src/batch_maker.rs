@@ -15,13 +15,17 @@ use std::convert::TryInto as _;
 use std::net::SocketAddr;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{sleep, Duration, Instant};
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[cfg(test)]
 #[path = "tests/batch_maker_tests.rs"]
 pub mod batch_maker_tests;
 
 pub type Transaction = Vec<u8>;
-pub type Batch = Vec<Transaction>;
+pub type BatchV = Vec<Transaction>;
+pub type Batch = Block;
+
 
 /// Assemble clients transactions into batches.
 pub struct BatchMaker {
@@ -35,8 +39,10 @@ pub struct BatchMaker {
     tx_message: Sender<QuorumWaiterMessage>,
     /// The network addresses of the other workers that share our worker id.
     workers_addresses: Vec<(PublicKey, SocketAddr)>,
+    /// Holds the last batch, i.e., parent for current batch
+    last_batch: Digest,
     /// Holds the current batch.
-    current_batch: Batch,
+    current_batch: BatchV,
     /// Holds the size of the current batch (in bytes).
     current_batch_size: usize,
     /// A network sender to broadcast the batches to the other workers.
@@ -50,6 +56,7 @@ impl BatchMaker {
         rx_transaction: Receiver<Transaction>,
         tx_message: Sender<QuorumWaiterMessage>,
         workers_addresses: Vec<(PublicKey, SocketAddr)>,
+        last_batch: Digest,
     ) {
         tokio::spawn(async move {
             Self {
@@ -58,7 +65,8 @@ impl BatchMaker {
                 rx_transaction,
                 tx_message,
                 workers_addresses,
-                current_batch: Batch::with_capacity(batch_size * 2),
+                last_batch,
+                current_batch: BatchV::with_capacity(batch_size * 2),
                 current_batch_size: 0,
                 network: ReliableSender::new(),
             }
@@ -115,30 +123,32 @@ impl BatchMaker {
         // Serialize the batch.
         self.current_batch_size = 0;
         let batch: Vec<_> = self.current_batch.drain(..).collect();
-        let message = WorkerMessage::Batch(batch);
+        let block = Batch::new(batch, self.last_batch.clone()).await;
+        let message = WorkerMessage::Batch(block.clone());
         let serialized = bincode::serialize(&message).expect("Failed to serialize our own batch");
+        // #[cfg(feature = "benchmark")]
+        // {
+        // NOTE: This is one extra hash that is only needed to print the following log entries.
+        let digest = Digest(
+            Sha512::digest(&serialized).as_slice()[..32]
+                .try_into()
+                .unwrap(),
+        );
+        // update the last_batch
+        self.last_batch = digest.clone();
 
-        #[cfg(feature = "benchmark")]
-        {
-            // NOTE: This is one extra hash that is only needed to print the following log entries.
-            let digest = Digest(
-                Sha512::digest(&serialized).as_slice()[..32]
-                    .try_into()
-                    .unwrap(),
-            );
-
-            for id in tx_ids {
-                // NOTE: This log entry is used to compute performance.
-                info!(
-                    "Batch {:?} contains sample tx {}",
-                    digest,
-                    u64::from_be_bytes(id)
-                );
-            }
-
+        for id in tx_ids {
             // NOTE: This log entry is used to compute performance.
-            info!("Batch {:?} contains {} B", digest, size);
+            info!(
+                "Batch {:?} contains sample tx {}",
+                digest,
+                u64::from_be_bytes(id)
+            );
         }
+
+        // NOTE: This log entry is used to compute performance.
+        info!("Batch {:?} contains {} B", digest, size);
+        // }
 
         // Broadcast the batch through the network.
         let (names, addresses): (Vec<_>, _) = self.workers_addresses.iter().cloned().unzip();
@@ -148,10 +158,51 @@ impl BatchMaker {
         // Send the batch through the deliver channel for further processing.
         self.tx_message
             .send(QuorumWaiterMessage {
+                digest: digest,
                 batch: serialized,
                 handlers: names.into_iter().zip(handlers.into_iter()).collect(),
             })
             .await
             .expect("Failed to deliver batch");
+    }
+}
+
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Block {
+    pub batch: Vec<Transaction>,
+    pub parent: Digest,
+}
+
+impl Block {
+    pub async fn new(
+        batch: Vec<Transaction>,
+        parent: Digest,
+    ) -> Self {
+        // let ack = Self {
+        //     batch: batch,
+        //     signature: Signature::default(),
+        // };
+        Self { batch, parent }
+    }
+}
+
+// impl Hash for Block {
+//     fn digest(&self) -> Digest {
+//         let mut hasher = Sha512::new();
+//         // hasher.update(self.batch);
+//         hasher.update(self.parent.clone());
+//         Digest(hasher.finalize().as_slice()[..32].try_into().unwrap())
+//     }
+// }
+
+impl fmt::Debug for Block {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            " {:?}",
+            // self.batch,
+            self.parent
+        )
     }
 }

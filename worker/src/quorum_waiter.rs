@@ -1,11 +1,15 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 use crate::processor::SerializedBatchMessage;
 use config::{Committee, Stake};
-use crypto::PublicKey;
+use crypto::{PublicKey, Digest};
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::stream::StreamExt as _;
 use network::CancelHandler;
 use tokio::sync::mpsc::{Receiver, Sender};
+use log::{warn};
+use crate::worker::WorkerMessage;
+use primary::error::DagError;
+
 
 #[cfg(test)]
 #[path = "tests/quorum_waiter_tests.rs"]
@@ -13,6 +17,7 @@ pub mod quorum_waiter_tests;
 
 #[derive(Debug)]
 pub struct QuorumWaiterMessage {
+    pub digest: Digest,
     /// A serialized `WorkerMessage::Batch` message.
     pub batch: SerializedBatchMessage,
     /// The cancel handlers to receive the acknowledgements of our broadcast.
@@ -52,34 +57,61 @@ impl QuorumWaiter {
     }
 
     /// Helper function. It waits for a future to complete and then delivers a value.
-    async fn waiter(wait_for: CancelHandler, deliver: Stake) -> Stake {
-        let _ = wait_for.await;
-        deliver
+    async fn waiter(digest: Digest, wait_for: CancelHandler, deliver: Stake) -> Stake {
+        let msg = wait_for.await;
+        match msg{
+            Ok(serialized) => {
+                let worker_msg = bincode::deserialize(&serialized);
+                match worker_msg {
+                    
+                    Ok(WorkerMessage::Ack(ack)) => {
+                        let _ = match ack.signature
+                            .verify(&digest, &ack.author)
+                            .map_err(DagError::from) {
+                                Ok(()) => {
+                                    // info!(
+                                    //     "check {:#?} true",
+                                    //     digest
+                                    // );
+                                    return deliver
+                                }
+                                error => error
+                        };
+                    }
+                    Ok(WorkerMessage::Batch(..)) => {}
+                    Ok(WorkerMessage::BatchRequest(..)) => {}
+                    Err(e) => warn!("Serialization error: {}", e),
+                }
+            }
+            Err(e) => warn!("waiter error: {}", e),
+        }
+        0
     }
+
 
     /// Main loop.
     async fn run(&mut self) {
-        while let Some(QuorumWaiterMessage { batch, handlers }) = self.rx_message.recv().await {
+        while let Some(QuorumWaiterMessage {digest, batch, handlers}) = self.rx_message.recv().await {
             let mut wait_for_quorum: FuturesUnordered<_> = handlers
                 .into_iter()
                 .map(|(name, handler)| {
                     let stake = self.committee.stake(&name);
-                    Self::waiter(handler, stake)
+                    Self::waiter(digest.clone(), handler, stake)
                 })
                 .collect();
 
-            // Wait for the first 2f nodes to send back an Ack. Then we consider the batch
+            // Wait for the first f nodes to send back an Ack. Then we consider the batch
             // delivered and we send its digest to the primary (that will include it into
             // the dag). This should reduce the amount of synching.
             let mut total_stake = self.stake;
             while let Some(stake) = wait_for_quorum.next().await {
                 total_stake += stake;
-                if total_stake >= self.committee.quorum_threshold() {
+                if total_stake >= self.committee.validity_threshold() {
                     self.tx_batch
                         .send(batch)
                         .await
                         .expect("Failed to deliver batch");
-                    break;
+                        break;
                 }
             }
         }
