@@ -21,7 +21,7 @@ def local(ctx, debug=False):
         'duration': 20,
     }
     node_params = {
-        'header_size': 30,  # bytes
+        'header_size': 500,  # bytes
         'max_header_delay': 5_000,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 10_000,  # ms
@@ -37,7 +37,7 @@ def local(ctx, debug=False):
 
 
 @task
-def create(ctx, nodes=4):
+def create(ctx, nodes=10):
     ''' Create a testbed'''
     try:
         InstanceManager.make().create_instances(nodes)
@@ -112,7 +112,7 @@ def remote(ctx, debug=False):
         'runs': 1,
     }
     node_params = {
-        'header_size': 30,  # bytes
+        'header_size': 500,  # bytes
         'max_header_delay': 5_000,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 10_000,  # ms
