@@ -37,7 +37,7 @@ def local(ctx, debug=False):
 
 
 @task
-def create(ctx, nodes=4):
+def create(ctx, nodes=10):
     ''' Create a testbed'''
     try:
         InstanceManager.make().create_instances(nodes)
@@ -102,13 +102,13 @@ def addRTT(ctx):
 def remote(ctx, debug=False):
     ''' Run benchmarks on AWS '''
     bench_params = {
-        'faults': 0,
-        'nodes': [4],
+        'faults': 1,
+        'nodes': [10],
         'workers': 1,
         'collocate': True,
-        'rate': [50_000],
+        'rate': [200_000],
         'tx_size': 512,
-        'duration': 20,
+        'duration': 60,
         'runs': 1,
     }
     node_params = {
