@@ -170,9 +170,9 @@ impl Proposer {
             // the leader or the leader has enough votes to enable a commit).
             let enough_parents = !self.last_parents.is_empty();
             let _enough_digests = self.payload_size >= self.header_size;
-            let _has_digests = self.payload_size;
+            let has_digests = self.payload_size;
             let timer_expired = timer.is_elapsed();
-            if (timer_expired || advance) && enough_parents {
+            if (timer_expired || advance) && has_digests && enough_parents {
                 if timer_expired {
                     warn!("Timer expired for round {}", self.round);
                 }
