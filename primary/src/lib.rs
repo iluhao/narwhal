@@ -1,6 +1,6 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
 #[macro_use]
-mod error;
+pub mod error;
 mod aggregators;
 mod certificate_waiter;
 mod core;

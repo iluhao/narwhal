@@ -118,27 +118,27 @@ impl BatchMaker {
         let message = WorkerMessage::Batch(batch);
         let serialized = bincode::serialize(&message).expect("Failed to serialize our own batch");
 
-        #[cfg(feature = "benchmark")]
-        {
-            // NOTE: This is one extra hash that is only needed to print the following log entries.
-            let digest = Digest(
-                Sha512::digest(&serialized).as_slice()[..32]
-                    .try_into()
-                    .unwrap(),
-            );
+        // #[cfg(feature = "benchmark")]
+        
+        // NOTE: This is one extra hash that is only needed to print the following log entries.
+        let digest = Digest(
+            Sha512::digest(&serialized).as_slice()[..32]
+                .try_into()
+                .unwrap(),
+        );
 
-            for id in tx_ids {
-                // NOTE: This log entry is used to compute performance.
-                info!(
-                    "Batch {:?} contains sample tx {}",
-                    digest,
-                    u64::from_be_bytes(id)
-                );
-            }
-
+        for id in tx_ids {
             // NOTE: This log entry is used to compute performance.
-            info!("Batch {:?} contains {} B", digest, size);
+            info!(
+                "Batch {:?} contains sample tx {}",
+                digest,
+                u64::from_be_bytes(id)
+            );
         }
+
+        // NOTE: This log entry is used to compute performance.
+        info!("Batch {:?} contains {} B", digest, size);
+        
 
         // Broadcast the batch through the network.
         let (names, addresses): (Vec<_>, _) = self.workers_addresses.iter().cloned().unzip();
@@ -148,6 +148,7 @@ impl BatchMaker {
         // Send the batch through the deliver channel for further processing.
         self.tx_message
             .send(QuorumWaiterMessage {
+                digest: digest,
                 batch: serialized,
                 handlers: names.into_iter().zip(handlers.into_iter()).collect(),
             })

@@ -7,8 +7,11 @@ use crate::quorum_waiter::QuorumWaiter;
 use crate::synchronizer::Synchronizer;
 use async_trait::async_trait;
 use bytes::Bytes;
+use ed25519_dalek::Digest as _;
+use ed25519_dalek::Sha512;
+use std::convert::TryInto;
 use config::{Committee, Parameters, WorkerId};
-use crypto::{Digest, PublicKey};
+use crypto::{Digest, PublicKey, Signature, SignatureService};
 use futures::sink::SinkExt as _;
 use log::{error, info, warn};
 use network::{MessageHandler, Receiver, Writer};
@@ -17,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use store::Store;
 use tokio::sync::mpsc::{channel, Sender};
+use std::fmt;
 
 #[cfg(test)]
 #[path = "tests/worker_tests.rs"]
@@ -36,6 +40,7 @@ pub type SerializedBatchDigestMessage = Vec<u8>;
 #[derive(Debug, Serialize, Deserialize)]
 pub enum WorkerMessage {
     Batch(Batch),
+    Ack(Ack),
     BatchRequest(Vec<Digest>, /* origin */ PublicKey),
 }
 
@@ -50,6 +55,7 @@ pub struct Worker {
     parameters: Parameters,
     /// The persistent storage.
     store: Store,
+    signature_service: SignatureService,
 }
 
 impl Worker {
@@ -59,6 +65,7 @@ impl Worker {
         committee: Committee,
         parameters: Parameters,
         store: Store,
+        signature_service: SignatureService,
     ) {
         // Define a worker instance.
         let worker = Self {
@@ -67,6 +74,7 @@ impl Worker {
             committee,
             parameters,
             store,
+            signature_service,
         };
 
         // Spawn all worker tasks.
@@ -166,6 +174,7 @@ impl Worker {
                 .iter()
                 .map(|(name, addresses)| (*name, addresses.worker_to_worker))
                 .collect(),
+            
         );
 
         // The `QuorumWaiter` waits for 2f authorities to acknowledge reception of the batch. It then forwards
@@ -211,6 +220,8 @@ impl Worker {
             WorkerReceiverHandler {
                 tx_helper,
                 tx_processor,
+                name:self.name,
+                signature_service: self.signature_service.clone(),
             },
         );
 
@@ -265,21 +276,38 @@ impl MessageHandler for TxReceiverHandler {
 struct WorkerReceiverHandler {
     tx_helper: Sender<(Vec<Digest>, PublicKey)>,
     tx_processor: Sender<SerializedBatchMessage>,
+    name: PublicKey,
+    signature_service: SignatureService,
 }
 
 #[async_trait]
 impl MessageHandler for WorkerReceiverHandler {
     async fn dispatch(&self, writer: &mut Writer, serialized: Bytes) -> Result<(), Box<dyn Error>> {
         // Reply with an ACK.
-        let _ = writer.send(Bytes::from("Ack")).await;
-
         // Deserialize and parse the message.
         match bincode::deserialize(&serialized) {
-            Ok(WorkerMessage::Batch(..)) => self
-                .tx_processor
+            Ok(WorkerMessage::Batch(..)) => {
+                let batch = serialized.to_vec();
+                let digest = Digest(Sha512::digest(&batch).as_slice()[..32].try_into().unwrap());
+                let t = &mut self.signature_service.clone();
+                let ack  = Ack::new(digest, &self.name, t);
+                let message_ack = WorkerMessage::Ack(ack.await);
+                let serialized_ack = bincode::serialize(&message_ack).expect("Failed to serialize our own batch");
+                let bytes = Bytes::from(serialized_ack.clone());
+                let _ = writer.send(bytes).await;
+
+                self.tx_processor
                 .send(serialized.to_vec())
                 .await
-                .expect("Failed to send batch"),
+                    .expect("Failed to send batch");
+            }
+            Ok(WorkerMessage::Ack(ack)) => {
+                info!(
+                    "bbbbbb1 {:#?}",
+                    ack
+                );
+            }
+    
             Ok(WorkerMessage::BatchRequest(missing, requestor)) => self
                 .tx_helper
                 .send((missing, requestor))
@@ -316,3 +344,39 @@ impl MessageHandler for PrimaryReceiverHandler {
         Ok(())
     }
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Ack {
+    pub author: PublicKey,
+    pub signature: Signature,
+}
+
+impl Ack {
+    pub async fn new(
+        h_block: Digest,
+        author: &PublicKey,
+        signature_service: &mut SignatureService,
+    ) -> Self {
+        let ack = Self {
+            author: *author,
+            signature: Signature::default(),
+        };
+        let signature = signature_service.request_signature(h_block).await;
+        Self { signature, ..ack }
+    }
+}
+
+impl fmt::Debug for Ack {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{}: {:?}",
+            self.author,
+            self.signature
+        )
+    }
+}
+
+
+
+

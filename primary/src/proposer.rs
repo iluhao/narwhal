@@ -189,7 +189,7 @@ impl Proposer {
                 // Make a new header.
                 self.make_header(digests_count).await;
                 self.payload_size -= 32*digests_count;
-
+                // self.payload_size = 0;
 
                 // Reschedule the timer.
                 let deadline = Instant::now() + Duration::from_millis(self.max_header_delay);
