@@ -169,10 +169,10 @@ impl Proposer {
             // (ii) we have enough digests (minimum header size) and we are on the happy path (we can vote for
             // the leader or the leader has enough votes to enable a commit).
             let enough_parents = !self.last_parents.is_empty();
-            let _enough_digests = self.payload_size >= self.header_size;
-            let has_digests = self.payload_size;
+            let enough_digests = self.payload_size >= self.header_size;
+            // let has_digests = self.payload_size;
             let timer_expired = timer.is_elapsed();
-            if (timer_expired || advance) && has_digests != 0 && enough_parents {
+            if (timer_expired || advance) && enough_digests && enough_parents {
                 if timer_expired {
                     warn!("Timer expired for round {}", self.round);
                 }
