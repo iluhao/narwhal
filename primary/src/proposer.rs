@@ -172,7 +172,7 @@ impl Proposer {
             let _enough_digests = self.payload_size >= self.header_size;
             let has_digests = self.payload_size;
             let timer_expired = timer.is_elapsed();
-            if (timer_expired || advance) && has_digests && enough_parents {
+            if (timer_expired || advance) && has_digests != 0 && enough_parents {
                 if timer_expired {
                     warn!("Timer expired for round {}", self.round);
                 }
