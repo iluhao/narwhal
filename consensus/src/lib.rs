@@ -7,6 +7,9 @@ use primary::{Certificate, Round};
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc::{Receiver, Sender};
+use chrono::{Utc, DateTime};
+use std::sync::{Arc};
+use tokio::sync::RwLock;
 
 #[cfg(test)]
 #[path = "tests/consensus_tests.rs"]
@@ -74,8 +77,12 @@ pub struct Consensus {
     /// Outputs the sequence of ordered certificates to the application layer.
     tx_output: Sender<Certificate>,
 
+    batch_time: Arc<RwLock<HashMap<Digest, DateTime<Utc>>>>,
+
     /// The genesis certificates.
     genesis: Vec<Certificate>,
+
+    
 }
 
 impl Consensus {
@@ -85,6 +92,7 @@ impl Consensus {
         rx_primary: Receiver<Certificate>,
         tx_primary: Sender<Certificate>,
         tx_output: Sender<Certificate>,
+        batch_time: Arc<RwLock<HashMap<Digest, DateTime<Utc>>>>,
     ) {
         tokio::spawn(async move {
             Self {
@@ -93,6 +101,7 @@ impl Consensus {
                 rx_primary,
                 tx_primary,
                 tx_output,
+                batch_time,
                 genesis: Certificate::genesis(&committee),
             }
             .run()
@@ -104,6 +113,8 @@ impl Consensus {
         // The consensus state (everything else is immutable).
         let mut state = State::new(self.genesis.clone());
 
+        let mut cnt = 0;
+        let mut sum = 0;
         // Listen to incoming certificates.
         while let Some(certificate) = self.rx_primary.recv().await {
             debug!("Processing {:?}", certificate);
@@ -175,13 +186,27 @@ impl Consensus {
 
             // Output the sequence in the right order.
             for certificate in sequence {
-                #[cfg(not(feature = "benchmark"))]
-                info!("Committed {}", certificate.header);
+                // #[cfg(not(feature = "benchmark"))]
+                // info!("Committed {}", certificate.header);
 
                 #[cfg(feature = "benchmark")]
                 for digest in certificate.header.payload.keys() {
                     // NOTE: This log entry is used to compute performance.
-                    info!("Committed {} -> {:?}", certificate.header, digest);
+                    // info!("Committed {} -> {:?}", certificate.header, digest);
+                    let batch_time1 = self.batch_time.read().await;
+                    let start_time = match batch_time1.get(&digest) {
+                        Some(x) => x,
+                        None => continue,
+                    };
+                    let end_time = Utc::now();
+                    let duration = end_time.signed_duration_since(start_time);
+                    let latency = duration.num_milliseconds();
+                    cnt += 1;
+                    sum += latency;
+                    if cnt % 10 == 0 {
+                        let average = sum / cnt;
+                        info!("Digest {:?}  this latency {:?} total cnt {} ave latency {}",digest, latency, cnt, average);
+                    }
                 }
 
                 self.tx_primary

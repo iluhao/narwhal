@@ -41,6 +41,8 @@ pub struct BatchMaker {
     current_batch_size: usize,
     /// A network sender to broadcast the batches to the other workers.
     network: ReliableSender,
+    sum_batch_size: usize,
+    cnt_batch: usize,
 }
 
 impl BatchMaker {
@@ -61,6 +63,8 @@ impl BatchMaker {
                 current_batch: Batch::with_capacity(batch_size * 2),
                 current_batch_size: 0,
                 network: ReliableSender::new(),
+                sum_batch_size: 0,
+                cnt_batch: 0,
             }
             .run()
             .await;
@@ -104,13 +108,13 @@ impl BatchMaker {
         let size = self.current_batch_size;
 
         // Look for sample txs (they all start with 0) and gather their txs id (the next 8 bytes).
-        #[cfg(feature = "benchmark")]
-        let tx_ids: Vec<_> = self
-            .current_batch
-            .iter()
-            .filter(|tx| tx[0] == 0u8 && tx.len() > 8)
-            .filter_map(|tx| tx[1..9].try_into().ok())
-            .collect();
+        // #[cfg(feature = "benchmark")]
+        // let tx_ids: Vec<_> = self
+        //     .current_batch
+        //     .iter()
+        //     .filter(|tx| tx[0] == 0u8 && tx.len() > 8)
+        //     .filter_map(|tx| tx[1..9].try_into().ok())
+        //     .collect();
 
         // Serialize the batch.
         self.current_batch_size = 0;
@@ -126,18 +130,26 @@ impl BatchMaker {
                 .try_into()
                 .unwrap(),
         );
-
-        for id in tx_ids {
-            // NOTE: This log entry is used to compute performance.
-            info!(
-                "Batch {:?} contains sample tx {}",
-                digest,
-                u64::from_be_bytes(id)
-            );
+       
+        self.cnt_batch += 1;
+        self.sum_batch_size += size / 512;
+        // info!("self.cnt_batch {} self.sum_batch_size {} tx_ids.len() {} ", self.cnt_batch, self.sum_batch_size, tx_ids.len());
+        if self.cnt_batch % 10 == 0 {
+            let ave_batch_size = self.sum_batch_size / self.cnt_batch;
+            info!("cnt_batch {} ave_batch_size {}", self.cnt_batch, ave_batch_size);
         }
+        
+        // for id in tx_ids {
+            // NOTE: This log entry is used to compute performance.
+            // info!(
+                // "Batch {:?} contains sample tx {}",
+                // digest,
+                // u64::from_be_bytes(id)
+            // );
+        // }
 
         // NOTE: This log entry is used to compute performance.
-        info!("Batch {:?} contains {} B", digest, size);
+        // info!("Batch {:?} contains {} B", digest, size);
         
 
         // Broadcast the batch through the network.

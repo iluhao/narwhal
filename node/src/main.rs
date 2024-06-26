@@ -11,7 +11,11 @@ use store::Store;
 use tokio::sync::mpsc::{channel, Receiver};
 use worker::Worker;
 use crypto::SignatureService;
-
+use crypto::{Digest};
+use std::collections::{HashMap};
+use chrono::{Utc, DateTime};
+use std::sync::{Arc};
+use tokio::sync::RwLock;
 /// The default channel capacity.
 pub const CHANNEL_CAPACITY: usize = 1_000;
 
@@ -97,6 +101,8 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
     let secret1 = keypair1.secret;
     let signature_service = SignatureService::new(secret1);
 
+    
+
 
 
     // Check whether to run a primary, a worker, or an entire authority.
@@ -105,6 +111,12 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
         ("primary", _) => {
             let (tx_new_certificates, rx_new_certificates) = channel(CHANNEL_CAPACITY);
             let (tx_feedback, rx_feedback) = channel(CHANNEL_CAPACITY);
+            let batch_time: Arc<RwLock<HashMap<Digest, DateTime<Utc>>>> = Arc::new(RwLock::new(HashMap::new()));
+            let read_batch_time = Arc::clone(&batch_time);
+            let write_batch_time = Arc::clone(&batch_time);
+
+            
+
             Primary::spawn(
                 keypair,
                 committee.clone(),
@@ -112,6 +124,7 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
                 store,
                 /* tx_consensus */ tx_new_certificates,
                 /* rx_consensus */ rx_feedback,
+                write_batch_time,
             );
             Consensus::spawn(
                 committee,
@@ -119,6 +132,7 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
                 /* rx_primary */ rx_new_certificates,
                 /* tx_primary */ tx_feedback,
                 tx_output,
+                read_batch_time,
             );
         }
 
@@ -129,7 +143,13 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
                 .unwrap()
                 .parse::<WorkerId>()
                 .context("The worker id must be a positive integer")?;
-            Worker::spawn(keypair.name, id, committee, parameters, store, signature_service.clone());
+            Worker::spawn(
+                keypair.name, 
+                id, 
+                committee, 
+                parameters,
+                store, 
+                signature_service.clone());
         }
         _ => unreachable!(),
     }

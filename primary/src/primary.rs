@@ -19,9 +19,12 @@ use network::{MessageHandler, Receiver as NetworkReceiver, Writer};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
+use std::sync::{Arc};
+use tokio::sync::RwLock;
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use std::collections::{HashMap};
+use chrono::{Utc, DateTime};
 
 /// The default channel capacity for each channel of the primary.
 pub const CHANNEL_CAPACITY: usize = 1_000;
@@ -65,6 +68,7 @@ impl Primary {
         store: Store,
         tx_consensus: Sender<Certificate>,
         rx_consensus: Receiver<Certificate>,
+        batch_time: Arc<RwLock<HashMap<Digest, DateTime<Utc>>>>
     ) {
         let (tx_others_digests, rx_others_digests) = channel(CHANNEL_CAPACITY);
         let (tx_our_digests, rx_our_digests) = channel(CHANNEL_CAPACITY);
@@ -119,6 +123,7 @@ impl Primary {
             WorkerReceiverHandler {
                 tx_our_digests,
                 tx_others_digests,
+                batch_time,
             },
         );
         info!(
@@ -248,6 +253,7 @@ impl MessageHandler for PrimaryReceiverHandler {
 struct WorkerReceiverHandler {
     tx_our_digests: Sender<(Digest, WorkerId)>,
     tx_others_digests: Sender<(Digest, WorkerId)>,
+    batch_time: Arc<RwLock<HashMap<Digest, DateTime<Utc>>>>,
 }
 
 #[async_trait]
@@ -258,12 +264,22 @@ impl MessageHandler for WorkerReceiverHandler {
         serialized: Bytes,
     ) -> Result<(), Box<dyn Error>> {
         // Deserialize and parse the message.
+        
         match bincode::deserialize(&serialized).map_err(DagError::SerializationError)? {
-            WorkerPrimaryMessage::OurBatch(digest, worker_id) => self
+            WorkerPrimaryMessage::OurBatch(digest, worker_id) => {
+                
+                
+                let mut batch_time1 = self.batch_time.write().await;
+                batch_time1.insert(digest.clone(), Utc::now());
+                
+
+                self
                 .tx_our_digests
-                .send((digest, worker_id))
+                .send((digest.clone(), worker_id))
                 .await
-                .expect("Failed to send workers' digests"),
+                .expect("Failed to send workers' digests");
+
+            }
             WorkerPrimaryMessage::OthersBatch(digest, worker_id) => self
                 .tx_others_digests
                 .send((digest, worker_id))

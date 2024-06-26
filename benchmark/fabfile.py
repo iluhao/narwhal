@@ -2,8 +2,8 @@
 from fabric import task
 
 from benchmark.local import LocalBench
-from benchmark.logs import ParseError, LogParser
-from benchmark.utils import Print
+from benchmark.logs import ParseError, LogParser, LogParser_opti
+from benchmark.utils import Print, PathMaker
 from benchmark.plot import Ploter, PlotError
 from benchmark.instance import InstanceManager
 from benchmark.remote import Bench, BenchError
@@ -16,12 +16,12 @@ def local(ctx, debug=False):
         'faults': 0,
         'nodes': 4,
         'workers': 1,
-        'rate': 1_000,
+        'rate': 100_000,
         'tx_size': 512,
         'duration': 20,
     }
     node_params = {
-        'header_size': 30,  # bytes
+        'header_size': 500,  # bytes
         'max_header_delay': 5_000,  # ms
         'gc_depth': 50,  # rounds
         'sync_retry_delay': 10_000,  # ms
@@ -31,7 +31,8 @@ def local(ctx, debug=False):
     }
     try:
         ret = LocalBench(bench_params, node_params).run(debug)
-        print(ret.result())
+        ret_opti = LogParser_opti.process(PathMaker.logs_path())
+        print(ret_opti.result_opti())
     except BenchError as e:
         Print.error(e)
 

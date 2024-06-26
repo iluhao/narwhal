@@ -45,6 +45,8 @@ pub struct Proposer {
     digests: Vec<(Digest, WorkerId)>,
     /// Keeps track of the size (in bytes) of batches' digests that we received so far.
     payload_size: usize,
+    sum_header_size: usize,
+    cnt_header: usize,
 }
 
 impl Proposer {
@@ -75,6 +77,8 @@ impl Proposer {
                 last_leader: None,
                 digests: Vec::with_capacity(2 * 30),
                 payload_size: 0,
+                sum_header_size: 0,
+                cnt_header: 0,
             }
             .run()
             .await;
@@ -94,11 +98,11 @@ impl Proposer {
         .await;
         debug!("Created {:?}", header);
 
-        #[cfg(feature = "benchmark")]
-        for digest in header.payload.keys() {
-            // NOTE: This log entry is used to compute performance.
-            info!("Created {} -> {:?}", header, digest);
-        }
+        // #[cfg(feature = "benchmark")]
+        // for digest in header.payload.keys() {
+        //     // NOTE: This log entry is used to compute performance.
+        //     info!("Created {} -> {:?}", header, digest);
+        // }
 
         // Send the new header to the `Core` that will broadcast and process it.
         self.tx_core
@@ -186,6 +190,12 @@ impl Proposer {
                     y += 1;
                 }
                 let digests_count = min(y, has_digests/32);
+                self.cnt_header += 1;
+                self.sum_header_size += digests_count;
+                if self.cnt_header % 10 == 0 {
+                    let ave_header_size = self.sum_header_size / self.cnt_header;
+                    info!("cnt_header {} sum_header_size {} ave_header_size {}", self.cnt_header, self.sum_header_size, ave_header_size);
+                }
                 // Make a new header.
                 self.make_header(digests_count).await;
                 self.payload_size -= 32*digests_count;
