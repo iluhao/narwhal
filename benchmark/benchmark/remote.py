@@ -13,7 +13,7 @@ import subprocess
 from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError
 from benchmark.utils import BenchError, Print, PathMaker, progress_bar
 from benchmark.commands import CommandMaker
-from benchmark.logs import LogParser, ParseError
+from benchmark.logs import LogParser, ParseError, LogParser_opti
 from benchmark.instance import InstanceManager
 
 
@@ -354,7 +354,7 @@ class Bench:
 
         # Parse logs and return the parser.
         Print.info('Parsing logs and computing performance...')
-        return LogParser.process(PathMaker.logs_path(), faults=faults)
+        return LogParser_opti.process(PathMaker.logs_path(), faults=faults)
 
     def run(self, bench_parameters_dict, node_parameters_dict, debug=False):
         assert isinstance(debug, bool)

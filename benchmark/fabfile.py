@@ -2,8 +2,8 @@
 from fabric import task
 
 from benchmark.local import LocalBench
-from benchmark.logs import ParseError, LogParser
-from benchmark.utils import Print
+from benchmark.logs import ParseError, LogParser, LogParser_opti
+from benchmark.utils import Print, PathMaker
 from benchmark.plot import Ploter, PlotError
 from benchmark.instance import InstanceManager
 from benchmark.remote import Bench, BenchError
@@ -99,16 +99,16 @@ def addRTT(ctx):
         Print.error(e)
 
 @task
-def remote(ctx, debug=False):
+def remote(ctx, debug=True):
     ''' Run benchmarks on AWS '''
     bench_params = {
         'faults': 0,
-        'nodes': [4],
+        'nodes': [10],
         'workers': 1,
         'collocate': True,
-        'rate': [50_000],
+        'rate': [300_000],
         'tx_size': 512,
-        'duration': 20,
+        'duration': 40,
         'runs': 1,
     }
     node_params = {
@@ -121,6 +121,8 @@ def remote(ctx, debug=False):
         'max_batch_delay': 200  # ms
     }
     try:
+        # ret_opti = LogParser_opti.process(PathMaker.logs_path())
+        # print(ret_opti.result_opti())
         Bench(ctx).run(bench_params, node_params, debug)
     except BenchError as e:
         Print.error(e)
